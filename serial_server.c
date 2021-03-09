@@ -32,7 +32,7 @@
 * Private types/enumerations/variables/define
 ****************************************************************************/
 #define SERVER_PORT 1234
-#define BUFSIZE 1024
+#define BUFSIZE 4096
 #define BACKLOG 10
 #define PROTOCOL 0
 #define FLAGS    0
@@ -47,6 +47,35 @@
 /*****************************************************************************
 * Public functions
 ****************************************************************************/
+int write_all(int socket, char *buf, int len)
+{
+    int total = 0, send_bytes;
+    int bytesleft = len;
+    while (bytesleft > 0)
+    {
+        send_bytes = write(socket, buf + total, bytesleft);
+        total += send_bytes;
+        bytesleft -= send_bytes;
+    }
+    
+    return total > 0 ? total:-1;
+}
+
+int read_all(int socket, char *buf, int len)
+{
+    int total = 0, recv_bytes;
+    int bytesleft = len;
+    while (bytesleft > 0)
+    {
+        recv_bytes =read(socket, buf + total, bytesleft);
+        total += recv_bytes;
+        bytesleft -= recv_bytes;
+        //printf("recv_bytes %d total %d in readall\n", recv_bytes, total);
+    }
+    
+    return total > 0 ? total:-1;
+}
+
 
 int serial_open_port(void)
 {
@@ -80,24 +109,30 @@ int serial_set_port(int serial_socket)
     }
 
     /* set baud rate 19200 */
-    cfsetispeed(&options, B921600);
-    cfsetospeed(&options, B921600);
-//921600
+    cfsetspeed(&options, B921600); //B921600 B115200
+
     /* set 8N1 and no parity */
     options.c_cflag &= ~PARENB;  /* disable parity */
     options.c_cflag &= ~CSTOPB;  /* set 1 stop bit */
     options.c_cflag &= ~CSIZE;
     options.c_cflag |= CS8;      /* set 8 data bit */
 
+    /* Enable RTS/CTS hardware flow control */
+    options.c_cflag |= CRTSCTS;
+    //options.c_iflag |= CRTSCTS;  
+    //options.c_oflag |= CRTSCTS;
+    //options.c_iflag |= (IXON | IXOFF | IXANY);
+    //options.c_oflag |= (IXON | IXOFF | IXANY);
+
     /* serial socket set raw I/O */
-    options.c_cflag |= (CLOCAL | CREAD);
-    options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
-    options.c_oflag &= ~OPOST;
+    options.c_cflag |= (CLOCAL | CREAD);  /* Enable the receiver and set local mode */
+    options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);  /* choose raw input */
+    options.c_oflag &= ~OPOST;  /* choose raw output */
 
-    options.c_cc[VMIN] = 0;
-    options.c_cc[VTIME] = 10;
+    options.c_cc[VMIN] = 0;  /* read doesn't block */
+    options.c_cc[VTIME] = 10; /* 0.1s read timeout */
 
-    /* set current socket option */
+    /* Set the new options for the port */
     if (tcsetattr(serial_socket, TCSANOW, &options) == -1)
     {
         perror("tcsetattr");
@@ -140,18 +175,18 @@ int tcp_server_setting()
 
 int main()
 {
-    int listener, new_fd, uport_fd, fd_max, recv_bytes;
-    fd_set master, read_fds;
+    int listener, new_fd, uport_fd, fd_max, recv_bytes, send_bytes;
+    fd_set master, read_fds, write_fds;
     struct sockaddr_in client_info;
     socklen_t client_info_size = sizeof(client_info);
 
-    char client_ip[INET_ADDRSTRLEN], recv_buf[BUFSIZE];
-    char recv_buf_serial[BUFSIZE];
+    char client_ip[INET_ADDRSTRLEN], before_serial[BUFSIZE];
+    char after_serial[BUFSIZE];
     /* clear the fds in master and read_fds set */
     FD_ZERO(&master);
     FD_ZERO(&read_fds);
 
-    //memset(&recv_buf, 0 sizeof(recv_buf));
+    //memset(&before_serial, 0 sizeof(before_serial));
 
     if ((listener = tcp_server_setting()) == -1)
     {
@@ -186,6 +221,7 @@ int main()
 
     while (1)
     {
+        //printf("%d\n", ++count);
         read_fds = master; /* update read_fds */
 
         if (select(fd_max + 1, &read_fds, NULL, NULL, NULL) == -1) /* listen connection whether is ready */
@@ -223,24 +259,20 @@ int main()
                 else if (i == uport_fd)
                 {
                     /* read data from serial */
-                    memset(recv_buf_serial, '\0', sizeof(recv_buf_serial));
-                    sleep(1);
-
-                    if ((recv_bytes = read(uport_fd, recv_buf_serial, sizeof(recv_buf_serial))) > 0)
+                    if ((recv_bytes = read_all(uport_fd, after_serial, sizeof(after_serial))) > 0)
                     {
-                        printf("server received '%s' from serial socket %d\n", recv_buf_serial, i); /* server recv data from serial */
-                        printf("server send '%s' to client\n\n", recv_buf_serial);
-
-                        if (send(new_fd, recv_buf_serial, sizeof(recv_buf_serial), FLAGS) <= 0)
+                        printf("recv %d from serial\n", recv_bytes);
+                        if (send_bytes=write(new_fd, after_serial, sizeof(after_serial)) > 0)
                         {
-                            perror("send");
+                            printf("send %d to client\n\n", send_bytes);
                         }
+                        //int tt;scanf("%d",&tt);
                     }
                 }
                 else
                 {
                     /* if the socket is client connection, handle recv from client */
-                    if ((recv_bytes = recv(i, recv_buf, sizeof(recv_buf), FLAGS)) <= 0)
+                    if ((recv_bytes = read(i, before_serial, sizeof(before_serial))) <= 0)
                     {
                         if (recv_bytes == 0)  /* handle recv == 0, client close the connection */
                         {
@@ -256,15 +288,11 @@ int main()
                     }
                     else
                     {
-                        printf("server received '%s' from client socket %d\n", recv_buf, i);
-
-                        if (write(uport_fd, recv_buf, sizeof(recv_buf)) == -1)  /* server send data from client to serial */
+                        printf("recv %d from client\n", recv_bytes);
+                        //printf("%s\n", before_serial);
+                        if ((send_bytes = write_all(uport_fd, before_serial, sizeof(before_serial))) > 0)  /* server send data from client to serial */
                         {
-                            perror("send");
-                        }
-                        else
-                        {
-                            printf("server send '%s' to serial\n\n", recv_buf);
+                            printf("send %d to serial\n", send_bytes);
                         }
                     }
                 }
