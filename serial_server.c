@@ -259,40 +259,34 @@ int main()
                 else if (i == uport_fd)
                 {
                     /* read data from serial */
-                    if ((recv_bytes = read_all(uport_fd, after_serial, sizeof(after_serial))) > 0)
+                    recv_bytes = read_all(uport_fd, after_serial, sizeof(after_serial));
+                    if (recv_bytes > 0)
                     {
-                        printf("recv %d from serial\n", recv_bytes);
-                        if (send_bytes=write(new_fd, after_serial, sizeof(after_serial)) > 0)
+                        //printf("recv %d from serial\n", recv_bytes);
+                        send_bytes = write(new_fd, after_serial, sizeof(after_serial));
+                        if (send_bytes > 0)
                         {
-                            printf("send %d to client\n\n", send_bytes);
+                            //printf("send %d to client\n\n", send_bytes);
                         }
                         //int tt;scanf("%d",&tt);
                     }
                 }
                 else
                 {
-                    /* if the socket is client connection, handle recv from client */
-                    if ((recv_bytes = read(i, before_serial, sizeof(before_serial))) <= 0)
+                    recv_bytes = read(i, before_serial, sizeof(before_serial));
+                    if (recv_bytes <= 0)
                     {
-                        if (recv_bytes == 0)  /* handle recv == 0, client close the connection */
-                        {
-                            printf("server: client socket %d close the connection\n", i);
-                        }
-                        else
-                        {
-                            perror("recv");
-                        }
-
+                        perror("recv");
                         close(i);
                         FD_CLR(i, &master);
                     }
                     else
                     {
-                        printf("recv %d from client\n", recv_bytes);
-                        //printf("%s\n", before_serial);
-                        if ((send_bytes = write_all(uport_fd, before_serial, sizeof(before_serial))) > 0)  /* server send data from client to serial */
+                        //printf("recv %d from client\n", recv_bytes);
+                        send_bytes = write(uport_fd, before_serial, sizeof(before_serial));
+                        if (send_bytes > 0)  
                         {
-                            printf("send %d to serial\n", send_bytes);
+                            //printf("send %d to serial\n", send_bytes);
                         }
                     }
                 }
