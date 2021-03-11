@@ -27,15 +27,20 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <time.h>
 
 /*****************************************************************************
 * Private types/enumerations/variables/define
 ****************************************************************************/
 #define SERVER_PORT 1234
-#define BUFSIZE 4096
+#define BUFSIZE 6000
 #define BACKLOG 10
 #define PROTOCOL 0
 #define FLAGS    0
+
+#define LOWLEVEL 2000
+#define HIGHLEVEL 4500
+#define ADDLEVEL 1500
 /*****************************************************************************
  * Private function declaration
  ****************************************************************************/
@@ -43,7 +48,7 @@
 /*****************************************************************************
  * Public variables
  ****************************************************************************/
-
+unsigned int g_level = 0;
 /*****************************************************************************
 * Public functions
 ****************************************************************************/
@@ -70,7 +75,7 @@ int read_all(int socket, char *buf, int len)
         recv_bytes =read(socket, buf + total, bytesleft);
         total += recv_bytes;
         bytesleft -= recv_bytes;
-        //printf("recv_bytes %d total %d in readall\n", recv_bytes, total);
+        printf("recv_bytes %d total %d in readall\n", recv_bytes, total);
     }
     
     return total > 0 ? total:-1;
@@ -175,6 +180,8 @@ int tcp_server_setting()
 
 int main()
 {
+    clock_t start, end, t1, t2;
+    double cpu_time;
     int listener, new_fd, uport_fd, fd_max, recv_bytes, send_bytes;
     fd_set master, read_fds, write_fds;
     struct sockaddr_in client_info;
@@ -218,10 +225,8 @@ int main()
     FD_SET(uport_fd, &master);
 
     fd_max = (listener > uport_fd) ? listener : uport_fd;
-
     while (1)
     {
-        //printf("%d\n", ++count);
         read_fds = master; /* update read_fds */
 
         if (select(fd_max + 1, &read_fds, NULL, NULL, NULL) == -1) /* listen connection whether is ready */
@@ -230,65 +235,87 @@ int main()
             return -1;
         }
 
-        for (int i = 0; i <= fd_max; i++)
+
+        if (FD_ISSET(listener, &read_fds)) /* if the socket in read_fd */
         {
-            if (FD_ISSET(i, &read_fds)) /* if the socket in read_fd */
+            /* if the socket is listener, handle new connection */
+            
+            if ((new_fd = accept(listener, (struct sockaddr *)&client_info, &client_info_size)) == -1) /* accept new connection */
             {
-                /* if the socket is listener, handle new connection */
-                if (i == listener)
+                perror("accept");
+                return -1;
+            }
+            else
+            {
+                FD_SET(new_fd, &master); /* update master set */
+
+                if (new_fd > fd_max)
                 {
-                    if ((new_fd = accept(listener, (struct sockaddr *)&client_info, &client_info_size)) == -1) /* accept new connection */
-                    {
-                        perror("accept");
-                        return -1;
-                    }
-                    else
-                    {
-                        FD_SET(new_fd, &master); /* update master set */
-
-                        if (new_fd > fd_max)
-                        {
-                            fd_max = new_fd;
-                        }
-
-                        printf("new connection from %s on socket %d\n", inet_ntop(AF_INET,
-                                (struct sockaddr *)&client_info.sin_addr, client_ip, sizeof(client_ip))
-                               , new_fd);
-                    }
+                    fd_max = new_fd;
                 }
-                else if (i == uport_fd)
+
+                printf("new connection from %s on socket %d\n", inet_ntop(AF_INET,
+                        (struct sockaddr *)&client_info.sin_addr, client_ip, sizeof(client_ip))
+                    , new_fd);
+            }
+            
+        }
+
+        if (FD_ISSET(new_fd, &read_fds)) 
+        {
+            if(g_level < HIGHLEVEL)
+            {
+                start = clock();
+                recv_bytes = read(new_fd, before_serial, ADDLEVEL);
+                end = clock();
+                //printf("read from client time = %f\n", cpu_time = ((double)(end-start)) / CLOCKS_PER_SEC);
+                if (recv_bytes <= 0)
                 {
-                    /* read data from serial */
-                    recv_bytes = read_all(uport_fd, after_serial, sizeof(after_serial));
-                    if (recv_bytes > 0)
-                    {
-                        //printf("recv %d from serial\n", recv_bytes);
-                        send_bytes = write(new_fd, after_serial, sizeof(after_serial));
-                        if (send_bytes > 0)
-                        {
-                            //printf("send %d to client\n\n", send_bytes);
-                        }
-                        //int tt;scanf("%d",&tt);
-                    }
+                    perror("recv");
+                    close(new_fd);
+                    FD_CLR(new_fd, &master);
                 }
                 else
                 {
-                    recv_bytes = read(i, before_serial, sizeof(before_serial));
-                    if (recv_bytes <= 0)
+                    printf("recv %d from client\n", recv_bytes);
+                    start = clock(); t1 = clock();
+                    send_bytes = write(uport_fd, before_serial, ADDLEVEL);
+                    end = clock();
+                    //printf("write serial time = %f\n", cpu_time = ((double)(end-start)) / CLOCKS_PER_SEC);
+                    if (send_bytes > 0)  
                     {
-                        perror("recv");
-                        close(i);
-                        FD_CLR(i, &master);
+                        g_level += send_bytes; 
+                        printf("send %d to serial\n", send_bytes);
+                        printf("glevel = %d\n", g_level);
                     }
-                    else
+                }
+            }
+        }
+
+        if (FD_ISSET(uport_fd, &read_fds)) 
+        {
+            if(g_level >= LOWLEVEL)
+            {
+                memset(after_serial, 0, sizeof(after_serial));
+                start = clock();
+                recv_bytes = read(uport_fd, after_serial, sizeof(after_serial));
+                end = clock(); t2 = clock();
+                //printf("read from serial time = %f\n", cpu_time = ((double)(end-start)) / CLOCKS_PER_SEC);
+                //printf("from serial write to serial read = %f\n", cpu_time = ((double)(t2 - t1)) / CLOCKS_PER_SEC);
+                if (recv_bytes > 0)
+                {
+                    printf("recv %d from serial\n", recv_bytes);
+                    start = clock();
+                    send_bytes = write(new_fd, after_serial, strlen(after_serial));
+                    end = clock();
+                    //printf("write to client time = %f\n\n", cpu_time = ((double)(end-start)) / CLOCKS_PER_SEC);
+                    if (send_bytes > 0)
                     {
-                        //printf("recv %d from client\n", recv_bytes);
-                        send_bytes = write(uport_fd, before_serial, sizeof(before_serial));
-                        if (send_bytes > 0)  
-                        {
-                            //printf("send %d to serial\n", send_bytes);
-                        }
+                        g_level -= send_bytes; 
+                        printf("send %d to client\n\n", send_bytes);
+                        printf("glevel = %d\n", g_level);
                     }
+                    int tt;printf("tt");scanf("%d",&tt);
                 }
             }
         }
