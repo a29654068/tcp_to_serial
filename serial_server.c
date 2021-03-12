@@ -33,14 +33,14 @@
 * Private types/enumerations/variables/define
 ****************************************************************************/
 #define SERVER_PORT 1234
-#define BUFSIZE 6000
+#define BUFSIZE 6000 
 #define BACKLOG 10
 #define PROTOCOL 0
 #define FLAGS    0
 
-#define LOWLEVEL 2000
-#define HIGHLEVEL 4500
-#define ADDLEVEL 1500
+#define LOWLEVEL 2600 
+#define HIGHLEVEL 4500 
+#define ADDLEVEL 1850
 /*****************************************************************************
  * Private function declaration
  ****************************************************************************/
@@ -52,35 +52,6 @@ unsigned int g_level = 0;
 /*****************************************************************************
 * Public functions
 ****************************************************************************/
-int write_all(int socket, char *buf, int len)
-{
-    int total = 0, send_bytes;
-    int bytesleft = len;
-    while (bytesleft > 0)
-    {
-        send_bytes = write(socket, buf + total, bytesleft);
-        total += send_bytes;
-        bytesleft -= send_bytes;
-    }
-    
-    return total > 0 ? total:-1;
-}
-
-int read_all(int socket, char *buf, int len)
-{
-    int total = 0, recv_bytes;
-    int bytesleft = len;
-    while (bytesleft > 0)
-    {
-        recv_bytes =read(socket, buf + total, bytesleft);
-        total += recv_bytes;
-        bytesleft -= recv_bytes;
-        printf("recv_bytes %d total %d in readall\n", recv_bytes, total);
-    }
-    
-    return total > 0 ? total:-1;
-}
-
 
 int serial_open_port(void)
 {
@@ -192,6 +163,7 @@ int main()
     /* clear the fds in master and read_fds set */
     FD_ZERO(&master);
     FD_ZERO(&read_fds);
+    FD_ZERO(&write_fds);
 
     //memset(&before_serial, 0 sizeof(before_serial));
 
@@ -221,15 +193,17 @@ int main()
     }
 
     /* update master set and fd_max */
+
     FD_SET(listener, &master);
     FD_SET(uport_fd, &master);
 
     fd_max = (listener > uport_fd) ? listener : uport_fd;
     while (1)
     {
+        //write_fds = master;
         read_fds = master; /* update read_fds */
 
-        if (select(fd_max + 1, &read_fds, NULL, NULL, NULL) == -1) /* listen connection whether is ready */
+        if (select(fd_max + 1, &read_fds, &write_fds, NULL, NULL) == -1) /* listen connection whether is ready */
         {
             perror("select");
             return -1;
@@ -265,10 +239,13 @@ int main()
         {
             if(g_level < HIGHLEVEL)
             {
-                start = clock();
+                //start = clock(); 
+
                 recv_bytes = read(new_fd, before_serial, ADDLEVEL);
-                end = clock();
+
+                //end = clock();
                 //printf("read from client time = %f\n", cpu_time = ((double)(end-start)) / CLOCKS_PER_SEC);
+
                 if (recv_bytes <= 0)
                 {
                     perror("recv");
@@ -277,16 +254,20 @@ int main()
                 }
                 else
                 {
-                    printf("recv %d from client\n", recv_bytes);
-                    start = clock(); t1 = clock();
-                    send_bytes = write(uport_fd, before_serial, ADDLEVEL);
-                    end = clock();
-                    //printf("write serial time = %f\n", cpu_time = ((double)(end-start)) / CLOCKS_PER_SEC);
+                    //printf("recv %d from client\n", recv_bytes);
+                    //start = clock(); if(tt == 0){t1=clock(); tt =1;}
+
+                    send_bytes = write(uport_fd, before_serial, recv_bytes);
+
+                    //end = clock(); 
+                    //printf("write to serial time = %f\n", cpu_time = ((double)(end-start)) / CLOCKS_PER_SEC);
+
                     if (send_bytes > 0)  
                     {
                         g_level += send_bytes; 
-                        printf("send %d to serial\n", send_bytes);
-                        printf("glevel = %d\n", g_level);
+
+                        //printf("send %d to serial\n", send_bytes);
+                        //printf("glevel = %d\n", g_level);
                     }
                 }
             }
@@ -296,29 +277,47 @@ int main()
         {
             if(g_level >= LOWLEVEL)
             {
-                memset(after_serial, 0, sizeof(after_serial));
-                start = clock();
+                //start = clock();
+
                 recv_bytes = read(uport_fd, after_serial, sizeof(after_serial));
-                end = clock(); t2 = clock();
+
+                //end = clock(); t2 = clock();tt = 0;
                 //printf("read from serial time = %f\n", cpu_time = ((double)(end-start)) / CLOCKS_PER_SEC);
                 //printf("from serial write to serial read = %f\n", cpu_time = ((double)(t2 - t1)) / CLOCKS_PER_SEC);
+
                 if (recv_bytes > 0)
                 {
-                    printf("recv %d from serial\n", recv_bytes);
-                    start = clock();
-                    send_bytes = write(new_fd, after_serial, strlen(after_serial));
-                    end = clock();
+                    //printf("recv %d from serial\n", recv_bytes);
+                    //start = clock();
+
+                    send_bytes = write(new_fd, after_serial, recv_bytes);
+
+                    //end = clock();
                     //printf("write to client time = %f\n\n", cpu_time = ((double)(end-start)) / CLOCKS_PER_SEC);
+
                     if (send_bytes > 0)
                     {
                         g_level -= send_bytes; 
-                        printf("send %d to client\n\n", send_bytes);
-                        printf("glevel = %d\n", g_level);
+
+                        //printf("send %d to client\n\n", send_bytes);
+                        //printf("glevel = %d\n", g_level);
                     }
-                    int tt;printf("tt");scanf("%d",&tt);
+                    //int tt;printf("tt");scanf("%d",&tt);
                 }
             }
         }
+    
+        /*if (FD_ISSET(new_fd, &write_fds))
+        {
+            send_bytes = write(new_fd, after_serial, strlen(after_serial));
+            if(send_bytes > 0)
+            {
+                g_level -= send_bytes; 
+
+                printf("send %d to client\n\n", send_bytes);
+                printf("glevel = %d\n", g_level);
+            }
+        }*/
     }
 
     close(uport_fd);
