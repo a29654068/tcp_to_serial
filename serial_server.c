@@ -7,7 +7,7 @@
 * This software is distributed under the terms of the
 * MOXA License. See the file COPYING-MOXA for details.
 *
-* \date 2021/03/03
+* \date 2021/03/12
 * First release
 * \author Alan Lan
 */
@@ -19,9 +19,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <fcntl.h>   /* File control definitions */
-#include <errno.h>   /* Error number definitions */
-#include <termios.h> /* POSIX terminal control definitions */
+#include <fcntl.h>   
+#include <errno.h>   
+#include <termios.h> 
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -36,30 +36,39 @@
 #define BUFSIZE 6000 
 #define BACKLOG 10
 #define PROTOCOL 0
-#define FLAGS    0
 
+/* define for level */
 #define LOWLEVEL 2600 
 #define HIGHLEVEL 4500 
 #define ADDLEVEL 1850
+
 /*****************************************************************************
  * Private function declaration
  ****************************************************************************/
-
+static int serial_open_port(void);
+static int serial_set_port(int serial_socket);
+static int tcp_server_setting();
 /*****************************************************************************
  * Public variables
  ****************************************************************************/
 unsigned int g_level = 0;
-/*****************************************************************************
-* Public functions
-****************************************************************************/
 
-int serial_open_port(void)
+/*****************************************************************************
+ * Private functions
+ ****************************************************************************/
+/**
+ *	\brief	        open the serial port.
+ *	\param[in]	None	
+ *
+ *	\return         socket number
+ *
+ *	This function open th serial port and set some options.
+ */
+static int serial_open_port(void)
 {
     int serial_socket;
 
     serial_socket = open("/dev/ttyUSB0", O_RDWR | O_NOCTTY | O_NDELAY); /* open port and set socket non-blocking */
-
-    //serial_socket = open("/dev/ttyUSB0", O_RDWR | O_NOCTTY );
 
     if (serial_socket == -1)
     {
@@ -73,7 +82,16 @@ int serial_open_port(void)
     return serial_socket;
 }
 
-int serial_set_port(int serial_socket)
+/**
+ *	\brief	        set the serial port option.
+ *	\param[in]	serialsocket	
+ *
+ *	\return 0       set successfully
+ *  \return -1      set failed
+ *
+ *	This function set th serial port baud rate, flow control, and other parameter configuration about serial.
+ */
+static int serial_set_port(int serial_socket)
 {
     struct termios options;
 
@@ -84,8 +102,8 @@ int serial_set_port(int serial_socket)
         return -1;
     }
 
-    /* set baud rate 19200 */
-    cfsetspeed(&options, B921600); //B921600 B115200
+    /* set baud rate 921600 */
+    cfsetspeed(&options, B921600);
 
     /* set 8N1 and no parity */
     options.c_cflag &= ~PARENB;  /* disable parity */
@@ -95,10 +113,6 @@ int serial_set_port(int serial_socket)
 
     /* Enable RTS/CTS hardware flow control */
     options.c_cflag |= CRTSCTS;
-    //options.c_iflag |= CRTSCTS;  
-    //options.c_oflag |= CRTSCTS;
-    //options.c_iflag |= (IXON | IXOFF | IXANY);
-    //options.c_oflag |= (IXON | IXOFF | IXANY);
 
     /* serial socket set raw I/O */
     options.c_cflag |= (CLOCAL | CREAD);  /* Enable the receiver and set local mode */
@@ -118,7 +132,16 @@ int serial_set_port(int serial_socket)
     return 0;
 }
 
-int tcp_server_setting()
+/**
+ *	\brief	            set the tcp server.
+ *	\param[in]	None	
+ *
+ *	\return listener    set successfully and return listener socket number
+ *  \return -1          set failed
+ *
+ *	This function set the tcp server.
+ */
+static int tcp_server_setting()
 {
     int listener, optval = 1;
     struct sockaddr_in server_info;
@@ -148,6 +171,10 @@ int tcp_server_setting()
 
     return listener;
 }
+/*****************************************************************************
+* Public functions
+****************************************************************************/
+
 
 int main()
 {
@@ -160,13 +187,13 @@ int main()
 
     char client_ip[INET_ADDRSTRLEN], before_serial[BUFSIZE];
     char after_serial[BUFSIZE];
-    /* clear the fds in master and read_fds set */
+    
+    /* clear the fds in master, write_fds read_fds set */
     FD_ZERO(&master);
     FD_ZERO(&read_fds);
     FD_ZERO(&write_fds);
 
-    //memset(&before_serial, 0 sizeof(before_serial));
-
+    /* setting the tcp server */
     if ((listener = tcp_server_setting()) == -1)
     {
         printf("server setting fail\n");
@@ -181,7 +208,7 @@ int main()
 
     printf("Server is listening\n");
 
-    /* open serial port */
+    /* open and set serial port */
     if ((uport_fd = serial_open_port()) == -1)
     {
         return -1;
@@ -193,14 +220,14 @@ int main()
     }
 
     /* update master set and fd_max */
-
     FD_SET(listener, &master);
     FD_SET(uport_fd, &master);
 
     fd_max = (listener > uport_fd) ? listener : uport_fd;
+
     while (1)
     {
-        //write_fds = master;
+        /* write_fds = master; */
         read_fds = master; /* update read_fds */
 
         if (select(fd_max + 1, &read_fds, &write_fds, NULL, NULL) == -1) /* listen connection whether is ready */
@@ -237,14 +264,15 @@ int main()
 
         if (FD_ISSET(new_fd, &read_fds)) 
         {
-            if(g_level < HIGHLEVEL)
+            if(g_level < HIGHLEVEL) /* if level is lower than HIGHLEVEL, starting read data from client */
             {
-                //start = clock(); 
+                /* start = clock();  
+                /* start, end is used to test the API execution time */
 
                 recv_bytes = read(new_fd, before_serial, ADDLEVEL);
 
-                //end = clock();
-                //printf("read from client time = %f\n", cpu_time = ((double)(end-start)) / CLOCKS_PER_SEC);
+                /* end = clock();
+                /* printf("read from client time = %f\n", cpu_time = ((double)(end-start)) / CLOCKS_PER_SEC); */
 
                 if (recv_bytes <= 0)
                 {
@@ -254,20 +282,20 @@ int main()
                 }
                 else
                 {
-                    //printf("recv %d from client\n", recv_bytes);
-                    //start = clock(); if(tt == 0){t1=clock(); tt =1;}
+                    /* printf("recv %d from client\n", recv_bytes);     test how many data read from client 
+                    /* start = clock(); if(tt == 0){t1=clock(); tt =1;} */
 
                     send_bytes = write(uport_fd, before_serial, recv_bytes);
 
-                    //end = clock(); 
-                    //printf("write to serial time = %f\n", cpu_time = ((double)(end-start)) / CLOCKS_PER_SEC);
+                    /* end = clock(); 
+                    /* printf("write to serial time = %f\n", cpu_time = ((double)(end-start)) / CLOCKS_PER_SEC); */
 
-                    if (send_bytes > 0)  
+                    if (send_bytes > 0)  /* add the water level */
                     {
                         g_level += send_bytes; 
 
-                        //printf("send %d to serial\n", send_bytes);
-                        //printf("glevel = %d\n", g_level);
+                        /* printf("send %d to serial\n", send_bytes);   test how many data send to serial
+                        /* printf("glevel = %d\n", g_level); */
                     }
                 }
             }
@@ -275,49 +303,38 @@ int main()
 
         if (FD_ISSET(uport_fd, &read_fds)) 
         {
-            if(g_level >= LOWLEVEL)
+            if(g_level >= LOWLEVEL) /* if level is higher than LOWLEVEL, starting read from serial */
             {
-                //start = clock();
+                /*start = clock(); */
 
                 recv_bytes = read(uport_fd, after_serial, sizeof(after_serial));
 
-                //end = clock(); t2 = clock();tt = 0;
-                //printf("read from serial time = %f\n", cpu_time = ((double)(end-start)) / CLOCKS_PER_SEC);
-                //printf("from serial write to serial read = %f\n", cpu_time = ((double)(t2 - t1)) / CLOCKS_PER_SEC);
+                /* end = clock(); t2 = clock();tt = 0;
+                /* printf("read from serial time = %f\n", cpu_time = ((double)(end-start)) / CLOCKS_PER_SEC);
+                /* printf("from serial write to serial read = %f\n", cpu_time = ((double)(t2 - t1)) / CLOCKS_PER_SEC); */
 
                 if (recv_bytes > 0)
                 {
-                    //printf("recv %d from serial\n", recv_bytes);
-                    //start = clock();
+                    /* printf("recv %d from serial\n", recv_bytes);      test how many data read from serial
+                    /* start = clock(); */
 
                     send_bytes = write(new_fd, after_serial, recv_bytes);
 
-                    //end = clock();
-                    //printf("write to client time = %f\n\n", cpu_time = ((double)(end-start)) / CLOCKS_PER_SEC);
+                    /* end = clock();
+                    /* printf("write to client time = %f\n\n", cpu_time = ((double)(end-start)) / CLOCKS_PER_SEC); */
 
-                    if (send_bytes > 0)
+                    if (send_bytes > 0) /* reduce the water level */
                     {
                         g_level -= send_bytes; 
 
-                        //printf("send %d to client\n\n", send_bytes);
-                        //printf("glevel = %d\n", g_level);
+                        /* printf("send %d to client\n\n", send_bytes);  test how many data send to client
+                        /* printf("glevel = %d\n", g_level); */
                     }
-                    //int tt;printf("tt");scanf("%d",&tt);
+                    /* blocking the processing to analyze/debug 
+                    /* int tt;printf("tt");scanf("%d",&tt); */
                 }
             }
         }
-    
-        /*if (FD_ISSET(new_fd, &write_fds))
-        {
-            send_bytes = write(new_fd, after_serial, strlen(after_serial));
-            if(send_bytes > 0)
-            {
-                g_level -= send_bytes; 
-
-                printf("send %d to client\n\n", send_bytes);
-                printf("glevel = %d\n", g_level);
-            }
-        }*/
     }
 
     close(uport_fd);
